@@ -33,9 +33,25 @@
 
 ```sql
 DROP TABLE IF EXISTS wedding_snapshots;
+DROP TABLE IF EXISTS wedding_invites;
 DROP TABLE IF EXISTS wedding_members;
 DROP TABLE IF EXISTS weddings;
 DROP TABLE IF EXISTS counters;
 ```
+
+## 成员与权限
+
+- `owner`：管理员，可邀请、管理成员及编辑全部筹备数据。
+- `editor`：协作者，可查看和编辑筹备数据。
+- `viewer`：只读成员，只能读取云端数据。
+
+加入婚礼改为一次性邀请码：
+
+- `GET /api/invites/preview/:inviteCode`：查看邀请身份、权限和婚礼信息。
+- `POST /api/invites/join`：使用邀请码加入婚礼。
+- `GET /api/members`：获取当前婚礼成员。
+- `POST /api/invites`：管理员生成 7 天有效的一次性邀请码。
+- `PATCH /api/members/:id`：管理员调整成员身份或权限。
+- `DELETE /api/members/:id`：管理员移除成员。
 
 不要在已有正式用户后执行上述 SQL。

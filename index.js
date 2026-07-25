@@ -9,6 +9,7 @@ const {
   Wedding,
   WeddingSnapshot,
   WeddingMember,
+  WeddingInvite,
 } = require("./db");
 
 const app = express();
@@ -48,7 +49,9 @@ async function requireWeddingMember(req, res, next) {
         message: "未获取到微信用户身份，请通过 wx.cloud.callContainer 调用",
       });
     }
-    const member = await WeddingMember.findOne({ where: { openid } });
+    const member = await WeddingMember.findOne({
+      where: { openid, status: "active" },
+    });
     if (!member) {
       return res.status(403).send({
         code: 403,
@@ -61,6 +64,26 @@ async function requireWeddingMember(req, res, next) {
   } catch (error) {
     next(error);
   }
+}
+
+function requireEditor(req, res, next) {
+  if (!["owner", "editor"].includes(req.member.permissionRole)) {
+    return res.status(403).send({
+      code: 403,
+      message: "你当前是只读成员，不能修改婚礼数据",
+    });
+  }
+  next();
+}
+
+function requireOwner(req, res, next) {
+  if (req.member.permissionRole !== "owner") {
+    return res.status(403).send({
+      code: 403,
+      message: "仅新郎或新娘管理员可以进行此操作",
+    });
+  }
+  next();
 }
 
 function validatePayload(payload) {
@@ -78,8 +101,12 @@ function validatePayload(payload) {
 
 function publicMember(member) {
   return {
+    id: member.id,
     name: member.name,
-    role: member.role,
+    relation: member.relation,
+    role: member.relation,
+    permissionRole: member.permissionRole,
+    status: member.status,
     weddingId: member.weddingId,
   };
 }
@@ -106,12 +133,27 @@ async function generateWeddingId(transaction) {
   throw new Error("暂时无法生成婚礼 ID，请稍后重试");
 }
 
-function validateMemberInput(body) {
+function validateMemberInput(body, options = {}) {
   const name = String(body.name || "").trim();
-  const role = String(body.role || "").trim();
+  const relation = String(body.relation || "").trim();
   if (name.length < 1 || name.length > 20) return "姓名需为 1—20 个字符";
-  if (!["新郎", "新娘"].includes(role)) return "请选择新郎或新娘";
+  if (relation.length < 1 || relation.length > 30) return "请选择或填写成员身份";
+  if (options.coupleOnly && !["新郎", "新娘"].includes(relation)) {
+    return "创建婚礼时请选择新郎或新娘";
+  }
   return "";
+}
+
+async function generateInviteCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    let inviteCode = "";
+    for (let index = 0; index < 10; index += 1) {
+      inviteCode += chars[crypto.randomInt(chars.length)];
+    }
+    if (!(await WeddingInvite.count({ where: { inviteCode } }))) return inviteCode;
+  }
+  throw new Error("暂时无法生成邀请码，请稍后重试");
 }
 
 app.get("/", (req, res) => {
@@ -125,7 +167,7 @@ app.get("/health", (req, res) => {
 app.get("/api/profile", requireWeChatUser, async (req, res, next) => {
   try {
     const member = await WeddingMember.findOne({
-      where: { openid: req.openid },
+      where: { openid: req.openid, status: "active" },
     });
     const wedding = member
       ? await Wedding.findOne({ where: { weddingId: member.weddingId } })
@@ -144,41 +186,18 @@ app.get("/api/profile", requireWeChatUser, async (req, res, next) => {
   }
 });
 
-app.get("/api/weddings/preview/:weddingId", requireWeChatUser, async (req, res, next) => {
-  try {
-    const weddingId = String(req.params.weddingId || "").trim().toUpperCase();
-    if (!/^[A-Z0-9]{6,16}$/.test(weddingId)) {
-      return res.status(400).send({ code: 400, message: "婚礼 ID 格式不正确" });
-    }
-    const wedding = await Wedding.findOne({ where: { weddingId } });
-    if (!wedding) {
-      return res.status(404).send({ code: 404, message: "没有找到这个婚礼" });
-    }
-    const members = await WeddingMember.findAll({
-      where: { weddingId },
-      attributes: ["name", "role"],
-    });
-    res.send({
-      code: 0,
-      data: {
-        wedding: publicWedding(wedding),
-        members: members.map(member => ({ name: member.name, role: member.role })),
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
 app.post("/api/weddings/create", requireWeChatUser, async (req, res, next) => {
   const transaction = await sequelize.transaction();
   try {
     const name = String(req.body.name || "").trim();
-    const role = String(req.body.role || "").trim();
+    const relation = String(req.body.relation || "").trim();
     const weddingDate = String(req.body.date || "").trim();
     const city = String(req.body.city || "").trim();
     const venue = String(req.body.venue || "").trim();
-    const validationError = validateMemberInput({ name, role });
+    const validationError = validateMemberInput(
+      { name, relation },
+      { coupleOnly: true }
+    );
     if (validationError) {
       await transaction.rollback();
       return res.status(400).send({ code: 400, message: validationError });
@@ -208,7 +227,14 @@ app.post("/api/weddings/create", requireWeChatUser, async (req, res, next) => {
       { transaction }
     );
     const member = await WeddingMember.create(
-      { openid: req.openid, weddingId, name, role },
+      {
+        openid: req.openid,
+        weddingId,
+        name,
+        relation,
+        permissionRole: "owner",
+        status: "active",
+      },
       { transaction }
     );
 
@@ -218,7 +244,7 @@ app.post("/api/weddings/create", requireWeChatUser, async (req, res, next) => {
     });
     const sortedMembers = members.sort((left, right) => {
       const order = { 新娘: 0, 新郎: 1 };
-      return order[left.role] - order[right.role];
+      return (order[left.relation] ?? 9) - (order[right.relation] ?? 9);
     });
     const couple = sortedMembers.map(item => item.name).join(" & ");
     const snapshot = await WeddingSnapshot.findOne({
@@ -245,8 +271,11 @@ app.post("/api/weddings/create", requireWeChatUser, async (req, res, next) => {
         profile: publicMember(member),
         wedding: publicWedding(wedding),
         members: sortedMembers.map(item => ({
+          id: item.id,
           name: item.name,
-          role: item.role,
+          relation: item.relation,
+          role: item.relation,
+          permissionRole: item.permissionRole,
         })),
       },
     });
@@ -256,22 +285,57 @@ app.post("/api/weddings/create", requireWeChatUser, async (req, res, next) => {
   }
 });
 
-app.post("/api/weddings/join", requireWeChatUser, async (req, res, next) => {
+app.get("/api/invites/preview/:inviteCode", requireWeChatUser, async (req, res, next) => {
+  try {
+    const inviteCode = String(req.params.inviteCode || "").trim().toUpperCase();
+    const invite = await WeddingInvite.findOne({
+      where: { inviteCode, status: "active" },
+    });
+    if (!invite || new Date(invite.expiresAt) <= new Date()) {
+      return res.status(404).send({
+        code: 404,
+        message: "邀请码不存在或已失效",
+      });
+    }
+    const wedding = await Wedding.findOne({
+      where: { weddingId: invite.weddingId },
+    });
+    const members = await WeddingMember.findAll({
+      where: { weddingId: invite.weddingId, status: "active" },
+      attributes: ["id", "name", "relation", "permissionRole"],
+    });
+    res.send({
+      code: 0,
+      data: {
+        wedding: publicWedding(wedding),
+        invite: {
+          relation: invite.relation,
+          permissionRole: invite.permissionRole,
+          expiresAt: invite.expiresAt,
+        },
+        members: members.map(publicMember),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/invites/join", requireWeChatUser, async (req, res, next) => {
   const transaction = await sequelize.transaction();
   try {
     const name = String(req.body.name || "").trim();
-    const role = String(req.body.role || "").trim();
-    const weddingId = String(req.body.weddingId || "").trim().toUpperCase();
-    const validationError = validateMemberInput({ name, role });
+    const inviteCode = String(req.body.inviteCode || "").trim().toUpperCase();
+    const validationError = validateMemberInput({ name, relation: "受邀成员" });
     if (validationError) {
       await transaction.rollback();
       return res.status(400).send({ code: 400, message: validationError });
     }
-    if (!/^[A-Z0-9]{6,16}$/.test(weddingId)) {
+    if (!/^[A-Z0-9]{10}$/.test(inviteCode)) {
       await transaction.rollback();
       return res.status(400).send({
         code: 400,
-        message: "婚礼 ID 需为 6—16 位英文字母或数字",
+        message: "请输入 10 位邀请码",
       });
     }
     const existingMember = await WeddingMember.findOne({
@@ -286,36 +350,43 @@ app.post("/api/weddings/join", requireWeChatUser, async (req, res, next) => {
         message: `当前账号已绑定婚礼 ${existingMember.weddingId}`,
       });
     }
-    const wedding = await Wedding.findOne({ where: { weddingId }, transaction });
-    if (!wedding) {
-      await transaction.rollback();
-      return res.status(404).send({ code: 404, message: "没有找到这个婚礼" });
-    }
-    const occupiedRole = await WeddingMember.findOne({
-      where: { weddingId, role },
+    const invite = await WeddingInvite.findOne({
+      where: { inviteCode, status: "active" },
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
-    if (occupiedRole) {
+    if (!invite || new Date(invite.expiresAt) <= new Date()) {
       await transaction.rollback();
-      return res.status(409).send({
-        code: 409,
-        message: `该婚礼的${role}已绑定，请选择另一身份`,
-      });
+      return res.status(404).send({ code: 404, message: "邀请码不存在或已失效" });
     }
+    const weddingId = invite.weddingId;
+    const wedding = await Wedding.findOne({ where: { weddingId }, transaction });
     const member = await WeddingMember.create(
-      { openid: req.openid, weddingId, name, role },
+      {
+        openid: req.openid,
+        weddingId,
+        name,
+        relation: invite.relation,
+        permissionRole: invite.permissionRole,
+        status: "active",
+      },
       { transaction }
     );
+    invite.status = "used";
+    invite.usedBy = member.id;
+    await invite.save({ transaction });
     const members = await WeddingMember.findAll({
-      where: { weddingId },
+      where: { weddingId, status: "active" },
       transaction,
     });
     const sortedMembers = members.sort((left, right) => {
       const order = { 新娘: 0, 新郎: 1 };
-      return order[left.role] - order[right.role];
+      return (order[left.relation] ?? 9) - (order[right.relation] ?? 9);
     });
-    const couple = sortedMembers.map(item => item.name).join(" & ");
+    const couple = sortedMembers
+      .filter(item => ["新娘", "新郎"].includes(item.relation))
+      .map(item => item.name)
+      .join(" & ");
     const snapshot = await WeddingSnapshot.findOne({
       where: { weddingId },
       transaction,
@@ -339,8 +410,11 @@ app.post("/api/weddings/join", requireWeChatUser, async (req, res, next) => {
         profile: publicMember(member),
         wedding: publicWedding(wedding),
         members: sortedMembers.map(item => ({
+          id: item.id,
           name: item.name,
-          role: item.role,
+          relation: item.relation,
+          role: item.relation,
+          permissionRole: item.permissionRole,
         })),
       },
     });
@@ -350,6 +424,165 @@ app.post("/api/weddings/join", requireWeChatUser, async (req, res, next) => {
   }
 });
 
+app.get("/api/members", requireWeddingMember, async (req, res, next) => {
+  try {
+    const members = await WeddingMember.findAll({
+      where: { weddingId: req.member.weddingId, status: "active" },
+      order: [["id", "ASC"]],
+    });
+    res.send({
+      code: 0,
+      data: members.map(member => ({
+        ...publicMember(member),
+        isMe: member.id === req.member.id,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post(
+  "/api/invites",
+  requireWeddingMember,
+  requireOwner,
+  async (req, res, next) => {
+    try {
+      const relation = String(req.body.relation || "").trim();
+      const permissionRole = String(req.body.permissionRole || "").trim();
+      if (!relation || relation.length > 30) {
+        return res.status(400).send({ code: 400, message: "请填写受邀人的身份" });
+      }
+      if (!["owner", "editor", "viewer"].includes(permissionRole)) {
+        return res.status(400).send({ code: 400, message: "邀请权限不正确" });
+      }
+      if (permissionRole === "owner" && !["新娘", "新郎"].includes(relation)) {
+        return res.status(400).send({
+          code: 400,
+          message: "只有新郎或新娘可以被邀请为管理员",
+        });
+      }
+      if (["新娘", "新郎"].includes(relation)) {
+        const existingCoupleMember = await WeddingMember.count({
+          where: {
+            weddingId: req.member.weddingId,
+            relation,
+            status: "active",
+          },
+        });
+        const existingCoupleInvite = await WeddingInvite.count({
+          where: {
+            weddingId: req.member.weddingId,
+            relation,
+            status: "active",
+          },
+        });
+        if (existingCoupleMember || existingCoupleInvite) {
+          return res.status(409).send({
+            code: 409,
+            message: `该婚礼已有${relation}或有效邀请`,
+          });
+        }
+      }
+      const inviteCode = await generateInviteCode();
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      const invite = await WeddingInvite.create({
+        inviteCode,
+        weddingId: req.member.weddingId,
+        relation,
+        permissionRole,
+        expiresAt,
+        createdBy: req.member.id,
+      });
+      res.send({
+        code: 0,
+        data: {
+          inviteCode: invite.inviteCode,
+          relation: invite.relation,
+          permissionRole: invite.permissionRole,
+          expiresAt: invite.expiresAt,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+app.patch(
+  "/api/members/:id",
+  requireWeddingMember,
+  requireOwner,
+  async (req, res, next) => {
+    try {
+      const member = await WeddingMember.findOne({
+        where: {
+          id: req.params.id,
+          weddingId: req.member.weddingId,
+          status: "active",
+        },
+      });
+      if (!member) {
+        return res.status(404).send({ code: 404, message: "没有找到该成员" });
+      }
+      if (member.id === req.member.id) {
+        return res.status(400).send({ code: 400, message: "不能修改自己的管理员权限" });
+      }
+      const relation = String(req.body.relation || member.relation).trim();
+      const permissionRole = String(
+        req.body.permissionRole || member.permissionRole
+      ).trim();
+      if (!relation || relation.length > 30) {
+        return res.status(400).send({ code: 400, message: "成员身份不正确" });
+      }
+      if (!["owner", "editor", "viewer"].includes(permissionRole)) {
+        return res.status(400).send({ code: 400, message: "成员权限不正确" });
+      }
+      if (permissionRole === "owner" && !["新娘", "新郎"].includes(relation)) {
+        return res.status(400).send({
+          code: 400,
+          message: "只有新郎或新娘可以设为管理员",
+        });
+      }
+      member.relation = relation;
+      member.permissionRole = permissionRole;
+      await member.save();
+      res.send({ code: 0, data: publicMember(member) });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+app.delete(
+  "/api/members/:id",
+  requireWeddingMember,
+  requireOwner,
+  async (req, res, next) => {
+    try {
+      const member = await WeddingMember.findOne({
+        where: {
+          id: req.params.id,
+          weddingId: req.member.weddingId,
+          status: "active",
+        },
+      });
+      if (!member) {
+        return res.status(404).send({ code: 404, message: "没有找到该成员" });
+      }
+      if (member.id === req.member.id) {
+        return res.status(400).send({ code: 400, message: "不能移除自己" });
+      }
+      member.status = "removed";
+      member.openid = `removed_${member.id}_${Date.now()}`;
+      await member.save();
+      res.send({ code: 0, message: "成员已移除" });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 app.get("/api/sync", requireWeddingMember, async (req, res, next) => {
   try {
     const snapshot = await WeddingSnapshot.findOne({
@@ -357,11 +590,15 @@ app.get("/api/sync", requireWeddingMember, async (req, res, next) => {
     });
     if (snapshot && snapshot.payload) {
       const members = await WeddingMember.findAll({
-        where: { weddingId: req.member.weddingId },
+        where: { weddingId: req.member.weddingId, status: "active" },
       });
       const roleOrder = { 新娘: 0, 新郎: 1 };
       const couple = members
-        .sort((left, right) => roleOrder[left.role] - roleOrder[right.role])
+        .filter(item => ["新娘", "新郎"].includes(item.relation))
+        .sort(
+          (left, right) =>
+            roleOrder[left.relation] - roleOrder[right.relation]
+        )
         .map(item => item.name)
         .filter(Boolean)
         .join(" & ");
@@ -394,7 +631,7 @@ app.get("/api/sync", requireWeddingMember, async (req, res, next) => {
   }
 });
 
-app.put("/api/sync", requireWeddingMember, async (req, res, next) => {
+app.put("/api/sync", requireWeddingMember, requireEditor, async (req, res, next) => {
   try {
     const { payload, baseVersion = 0 } = req.body;
     const validationError = validatePayload(payload);
@@ -442,7 +679,7 @@ app.put("/api/sync", requireWeddingMember, async (req, res, next) => {
   }
 });
 
-app.delete("/api/sync", requireWeddingMember, async (req, res, next) => {
+app.delete("/api/sync", requireWeddingMember, requireOwner, async (req, res, next) => {
   try {
     const memberCount = await WeddingMember.count({
       where: { weddingId: req.member.weddingId },
@@ -450,7 +687,7 @@ app.delete("/api/sync", requireWeddingMember, async (req, res, next) => {
     if (memberCount > 1) {
       return res.status(409).send({
         code: 409,
-        message: "该婚礼已有两位成员，不能单方面删除共享数据",
+        message: "该婚礼已有多位成员，不能直接删除共享数据",
       });
     }
     await WeddingSnapshot.destroy({

@@ -81,26 +81,78 @@ const WeddingMember = sequelize.define(
       type: DataTypes.STRING(40),
       allowNull: false,
     },
-    role: {
-      type: DataTypes.ENUM("新郎", "新娘"),
+    relation: {
+      type: DataTypes.STRING(30),
       allowNull: false,
+    },
+    permissionRole: {
+      type: DataTypes.ENUM("owner", "editor", "viewer"),
+      allowNull: false,
+      defaultValue: "viewer",
+    },
+    status: {
+      type: DataTypes.ENUM("active", "removed"),
+      allowNull: false,
+      defaultValue: "active",
     },
   },
   {
     tableName: "wedding_members",
     indexes: [
       {
-        unique: true,
-        fields: ["wedding_id", "role"],
+        fields: ["wedding_id", "relation"],
       },
     ],
   }
+);
+
+const WeddingInvite = sequelize.define(
+  "WeddingInvite",
+  {
+    inviteCode: {
+      type: DataTypes.STRING(16),
+      allowNull: false,
+      unique: true,
+    },
+    weddingId: {
+      type: DataTypes.STRING(16),
+      allowNull: false,
+    },
+    relation: {
+      type: DataTypes.STRING(30),
+      allowNull: false,
+    },
+    permissionRole: {
+      type: DataTypes.ENUM("owner", "editor", "viewer"),
+      allowNull: false,
+      defaultValue: "editor",
+    },
+    status: {
+      type: DataTypes.ENUM("active", "used", "revoked"),
+      allowNull: false,
+      defaultValue: "active",
+    },
+    expiresAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
+    createdBy: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: false,
+    },
+    usedBy: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: true,
+    },
+  },
+  { tableName: "wedding_invites" }
 );
 
 async function init() {
   await sequelize.authenticate();
   await Wedding.sync();
   await WeddingMember.sync();
+  await WeddingInvite.sync();
   await WeddingSnapshot.sync();
 }
 
@@ -110,4 +162,5 @@ module.exports = {
   Wedding,
   WeddingSnapshot,
   WeddingMember,
+  WeddingInvite,
 };
