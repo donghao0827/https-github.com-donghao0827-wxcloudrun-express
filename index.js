@@ -135,7 +135,7 @@ async function generateWeddingId(transaction) {
 
 function validateMemberInput(body, options = {}) {
   const name = String(body.name || "").trim();
-  const relation = String(body.relation || "").trim();
+  const relation = String(body.relation || body.role || "").trim();
   if (name.length < 1 || name.length > 20) return "姓名需为 1—20 个字符";
   if (relation.length < 1 || relation.length > 30) return "请选择或填写成员身份";
   if (options.coupleOnly && !["新郎", "新娘"].includes(relation)) {
@@ -190,7 +190,7 @@ app.post("/api/weddings/create", requireWeChatUser, async (req, res, next) => {
   const transaction = await sequelize.transaction();
   try {
     const name = String(req.body.name || "").trim();
-    const relation = String(req.body.relation || "").trim();
+    const relation = String(req.body.relation || req.body.role || "").trim();
     const weddingDate = String(req.body.date || "").trim();
     const city = String(req.body.city || "").trim();
     const venue = String(req.body.venue || "").trim();
