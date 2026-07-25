@@ -15,7 +15,9 @@
 
 - `GET /health`：健康检查
 - `GET /api/profile`：获取当前微信用户的姓名、身份和婚礼 ID
-- `POST /api/profile/bind`：首次绑定姓名、身份和婚礼 ID
+- `POST /api/weddings/create`：创建婚礼并由服务端生成婚礼 ID
+- `GET /api/weddings/preview/:weddingId`：加入前确认婚期和已有成员
+- `POST /api/weddings/join`：通过婚礼 ID 加入已有婚礼
 - `GET /api/sync`：获取当前用户的云端备婚快照
 - `PUT /api/sync`：提交 `payload` 和 `baseVersion` 更新数据
 - `DELETE /api/sync`：删除当前用户的云端数据
@@ -24,3 +26,16 @@
 同步内容按婚礼 ID 归属，包括婚礼信息、筹备任务、婚品、预算和宾客名单。
 新郎和新娘绑定相同婚礼 ID 后读写同一份数据。结婚照当前仍保存在小程序本地，
 不会通过此接口上传。
+
+## 首次部署
+
+当前没有正式用户时，建议删除旧模板表后重新部署，由 Sequelize 按新模型建表：
+
+```sql
+DROP TABLE IF EXISTS wedding_snapshots;
+DROP TABLE IF EXISTS wedding_members;
+DROP TABLE IF EXISTS weddings;
+DROP TABLE IF EXISTS counters;
+```
+
+不要在已有正式用户后执行上述 SQL。

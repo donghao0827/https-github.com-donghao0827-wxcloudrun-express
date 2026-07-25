@@ -18,6 +18,32 @@ const sequelize = new Sequelize(MYSQL_DATABASE, MYSQL_USERNAME, MYSQL_PASSWORD, 
   pool: { max: 8, min: 0, acquire: 30000, idle: 10000 },
 });
 
+const Wedding = sequelize.define(
+  "Wedding",
+  {
+    weddingId: {
+      type: DataTypes.STRING(16),
+      allowNull: false,
+      unique: true,
+    },
+    weddingDate: {
+      type: DataTypes.DATEONLY,
+      allowNull: false,
+    },
+    city: {
+      type: DataTypes.STRING(40),
+      allowNull: false,
+      defaultValue: "",
+    },
+    venue: {
+      type: DataTypes.STRING(100),
+      allowNull: false,
+      defaultValue: "",
+    },
+  },
+  { tableName: "weddings" }
+);
+
 const WeddingSnapshot = sequelize.define(
   "WeddingSnapshot",
   {
@@ -73,8 +99,15 @@ const WeddingMember = sequelize.define(
 
 async function init() {
   await sequelize.authenticate();
+  await Wedding.sync();
   await WeddingMember.sync();
   await WeddingSnapshot.sync();
 }
 
-module.exports = { init, sequelize, WeddingSnapshot, WeddingMember };
+module.exports = {
+  init,
+  sequelize,
+  Wedding,
+  WeddingSnapshot,
+  WeddingMember,
+};
