@@ -148,8 +148,35 @@ const WeddingInvite = sequelize.define(
   { tableName: "wedding_invites" }
 );
 
+async function resetLegacySchemaIfNeeded() {
+  const queryInterface = sequelize.getQueryInterface();
+  const tables = (await queryInterface.showAllTables()).map((table) => {
+    const tableName =
+      typeof table === "string"
+        ? table
+        : table.tableName || table.name || Object.values(table)[0];
+    return String(tableName).toLowerCase();
+  });
+  if (!tables.includes("wedding_members")) return;
+
+  const memberColumns = await queryInterface.describeTable("wedding_members");
+  if (memberColumns.relation) return;
+
+  console.warn("检测到旧版成员表，正在一次性清理测试数据并升级到 V2 结构");
+  await sequelize.query("SET FOREIGN_KEY_CHECKS = 0");
+  try {
+    await sequelize.query("DROP TABLE IF EXISTS wedding_invites");
+    await sequelize.query("DROP TABLE IF EXISTS wedding_snapshots");
+    await sequelize.query("DROP TABLE IF EXISTS wedding_members");
+    await sequelize.query("DROP TABLE IF EXISTS weddings");
+  } finally {
+    await sequelize.query("SET FOREIGN_KEY_CHECKS = 1");
+  }
+}
+
 async function init() {
   await sequelize.authenticate();
+  await resetLegacySchemaIfNeeded();
   await Wedding.sync();
   await WeddingMember.sync();
   await WeddingInvite.sync();
