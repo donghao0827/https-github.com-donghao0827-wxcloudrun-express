@@ -1,32 +1,80 @@
 const { Sequelize, DataTypes } = require("sequelize");
 
-// 从环境变量中读取数据库配置
-const { MYSQL_USERNAME, MYSQL_PASSWORD, MYSQL_ADDRESS = "" } = process.env;
+const {
+  MYSQL_USERNAME,
+  MYSQL_PASSWORD,
+  MYSQL_ADDRESS = "",
+  MYSQL_DATABASE = "nodejs_demo",
+} = process.env;
 
 const [host, port] = MYSQL_ADDRESS.split(":");
 
-const sequelize = new Sequelize("nodejs_demo", MYSQL_USERNAME, MYSQL_PASSWORD, {
+const sequelize = new Sequelize(MYSQL_DATABASE, MYSQL_USERNAME, MYSQL_PASSWORD, {
   host,
   port,
-  dialect: "mysql" /* one of 'mysql' | 'mariadb' | 'postgres' | 'mssql' */,
+  dialect: "mysql",
+  logging: process.env.NODE_ENV === "development" ? console.log : false,
+  define: { underscored: true },
+  pool: { max: 8, min: 0, acquire: 30000, idle: 10000 },
 });
 
-// 定义数据模型
-const Counter = sequelize.define("Counter", {
-  count: {
-    type: DataTypes.INTEGER,
-    allowNull: false,
-    defaultValue: 1,
+const WeddingSnapshot = sequelize.define(
+  "WeddingSnapshot",
+  {
+    weddingId: {
+      type: DataTypes.STRING(16),
+      allowNull: false,
+      unique: true,
+    },
+    version: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: false,
+      defaultValue: 1,
+    },
+    payload: {
+      type: DataTypes.JSON,
+      allowNull: false,
+    },
   },
-});
+  { tableName: "wedding_snapshots" }
+);
 
-// 数据库初始化方法
+const WeddingMember = sequelize.define(
+  "WeddingMember",
+  {
+    openid: {
+      type: DataTypes.STRING(64),
+      allowNull: false,
+      unique: true,
+    },
+    weddingId: {
+      type: DataTypes.STRING(16),
+      allowNull: false,
+    },
+    name: {
+      type: DataTypes.STRING(40),
+      allowNull: false,
+    },
+    role: {
+      type: DataTypes.ENUM("新郎", "新娘"),
+      allowNull: false,
+    },
+  },
+  {
+    tableName: "wedding_members",
+    indexes: [
+      {
+        unique: true,
+        fields: ["wedding_id", "role"],
+      },
+    ],
+  }
+);
+
 async function init() {
-  await Counter.sync({ alter: true });
+  await sequelize.authenticate();
+  await WeddingMember.sync();
+  await WeddingSnapshot.sync();
 }
 
-// 导出初始化方法和模型
-module.exports = {
-  init,
-  Counter,
-};
+module.exports = { init, sequelize, WeddingSnapshot, WeddingMember };
