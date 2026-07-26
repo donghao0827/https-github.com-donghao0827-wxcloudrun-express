@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
+const { Op } = require("sequelize");
 const {
   init: initDB,
   sequelize,
@@ -90,7 +91,15 @@ function validatePayload(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return "同步数据格式不正确";
   }
-  const allowedKeys = ["wedding", "tasks", "materials", "budgets", "guests"];
+  const allowedKeys = [
+    "wedding",
+    "tasks",
+    "materials",
+    "budgets",
+    "guests",
+    "photo",
+    "photoDisplay",
+  ];
   const unknownKeys = Object.keys(payload).filter(
     (key) => !allowedKeys.includes(key)
   );
@@ -470,17 +479,31 @@ app.post(
             status: "active",
           },
         });
-        const existingCoupleInvite = await WeddingInvite.count({
+        if (existingCoupleMember) {
+          return res.status(409).send({
+            code: 409,
+            message: `该婚礼已有${relation}`,
+          });
+        }
+        const existingCoupleInvite = await WeddingInvite.findOne({
           where: {
             weddingId: req.member.weddingId,
             relation,
             status: "active",
+            expiresAt: { [Op.gt]: new Date() },
           },
+          order: [["createdAt", "DESC"]],
         });
-        if (existingCoupleMember || existingCoupleInvite) {
-          return res.status(409).send({
-            code: 409,
-            message: `该婚礼已有${relation}或有效邀请`,
+        if (existingCoupleInvite) {
+          return res.send({
+            code: 0,
+            data: {
+              inviteCode: existingCoupleInvite.inviteCode,
+              relation: existingCoupleInvite.relation,
+              permissionRole: existingCoupleInvite.permissionRole,
+              expiresAt: existingCoupleInvite.expiresAt,
+              reused: true,
+            },
           });
         }
       }
