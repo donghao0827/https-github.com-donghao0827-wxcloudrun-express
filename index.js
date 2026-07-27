@@ -98,6 +98,7 @@ function validatePayload(payload) {
     "budgets",
     "guests",
     "photo",
+    "photoOriginal",
     "photoDisplay",
   ];
   const unknownKeys = Object.keys(payload).filter(
