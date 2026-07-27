@@ -113,6 +113,7 @@ function publicMember(member) {
   return {
     id: member.id,
     name: member.name,
+    avatarFileId: member.avatarFileId || "",
     relation: member.relation,
     role: member.relation,
     permissionRole: member.permissionRole,
@@ -447,6 +448,27 @@ app.get("/api/members", requireWeddingMember, async (req, res, next) => {
         isMe: member.id === req.member.id,
       })),
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/profile/avatar", requireWeddingMember, async (req, res, next) => {
+  try {
+    const avatarFileId = String(req.body.avatarFileId || "").trim();
+    if (
+      !avatarFileId ||
+      avatarFileId.length > 512 ||
+      !avatarFileId.startsWith("cloud://")
+    ) {
+      return res.status(400).send({
+        code: 400,
+        message: "头像文件地址不正确",
+      });
+    }
+    req.member.avatarFileId = avatarFileId;
+    await req.member.save();
+    res.send({ code: 0, data: publicMember(req.member) });
   } catch (error) {
     next(error);
   }

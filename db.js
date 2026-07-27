@@ -81,6 +81,11 @@ const WeddingMember = sequelize.define(
       type: DataTypes.STRING(40),
       allowNull: false,
     },
+    avatarFileId: {
+      type: DataTypes.STRING(512),
+      allowNull: false,
+      defaultValue: "",
+    },
     relation: {
       type: DataTypes.STRING(30),
       allowNull: false,
@@ -179,6 +184,16 @@ async function init() {
   await resetLegacySchemaIfNeeded();
   await Wedding.sync();
   await WeddingMember.sync();
+  const memberColumns = await sequelize
+    .getQueryInterface()
+    .describeTable("wedding_members");
+  if (!memberColumns.avatar_file_id) {
+    await sequelize.getQueryInterface().addColumn("wedding_members", "avatar_file_id", {
+      type: DataTypes.STRING(512),
+      allowNull: false,
+      defaultValue: "",
+    });
+  }
   await WeddingInvite.sync();
   await WeddingSnapshot.sync();
 }
