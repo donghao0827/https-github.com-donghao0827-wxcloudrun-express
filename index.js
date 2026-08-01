@@ -97,6 +97,7 @@ function validatePayload(payload) {
     "materials",
     "budgets",
     "guests",
+    "records",
     "photo",
     "photoOriginal",
     "photoDisplay",
@@ -107,6 +108,21 @@ function validatePayload(payload) {
   if (unknownKeys.length) return `包含不支持的字段：${unknownKeys.join(", ")}`;
   if (JSON.stringify(payload).length > 800000) return "同步数据超过大小限制";
   return "";
+}
+
+function collectCloudFileIds(value, result = new Set()) {
+  if (typeof value === "string") {
+    if (value.startsWith("cloud://")) result.add(value);
+    return result;
+  }
+  if (Array.isArray(value)) {
+    value.forEach(item => collectCloudFileIds(item, result));
+    return result;
+  }
+  if (value && typeof value === "object") {
+    Object.values(value).forEach(item => collectCloudFileIds(item, result));
+  }
+  return result;
 }
 
 function publicMember(member) {
@@ -619,10 +635,12 @@ app.delete(
       if (member.id === req.member.id) {
         return res.status(400).send({ code: 400, message: "不能移除自己" });
       }
+      const avatarFileId = member.avatarFileId || "";
       member.status = "removed";
       member.openid = `removed_${member.id}_${Date.now()}`;
+      member.avatarFileId = "";
       await member.save();
-      res.send({ code: 0, message: "成员已移除" });
+      res.send({ code: 0, message: "成员已移除", data: { avatarFileId } });
     } catch (error) {
       next(error);
     }
@@ -678,18 +696,28 @@ app.get("/api/sync", requireWeddingMember, async (req, res, next) => {
 });
 
 app.put("/api/sync", requireWeddingMember, requireEditor, async (req, res, next) => {
+  const transaction = await sequelize.transaction();
   try {
     const { payload, baseVersion = 0 } = req.body;
     const validationError = validatePayload(payload);
     if (validationError) {
+      await transaction.rollback();
       return res.status(400).send({ code: 400, message: validationError });
     }
 
+    const wedding = await Wedding.findOne({
+      where: { weddingId: req.member.weddingId },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
     let snapshot = await WeddingSnapshot.findOne({
       where: { weddingId: req.member.weddingId },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
     });
 
     if (snapshot && Number(baseVersion) !== snapshot.version) {
+      await transaction.rollback();
       return res.status(409).send({
         code: 409,
         message: "云端数据已更新，请先拉取最新数据",
@@ -706,13 +734,24 @@ app.put("/api/sync", requireWeddingMember, requireEditor, async (req, res, next)
         weddingId: req.member.weddingId,
         version: 1,
         payload,
-      });
+      }, { transaction });
     } else {
       snapshot.version += 1;
       snapshot.payload = payload;
-      await snapshot.save();
+      await snapshot.save({ transaction });
     }
 
+    const weddingPayload = payload.wedding || {};
+    if (wedding) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(weddingPayload.date || ""))) {
+        wedding.weddingDate = weddingPayload.date;
+      }
+      wedding.city = String(weddingPayload.city || "").trim().slice(0, 40);
+      wedding.venue = String(weddingPayload.venue || "").trim().slice(0, 100);
+      await wedding.save({ transaction });
+    }
+
+    await transaction.commit();
     res.send({
       code: 0,
       data: {
@@ -721,26 +760,62 @@ app.put("/api/sync", requireWeddingMember, requireEditor, async (req, res, next)
       },
     });
   } catch (error) {
+    await transaction.rollback();
     next(error);
   }
 });
 
 app.delete("/api/sync", requireWeddingMember, requireOwner, async (req, res, next) => {
+  const transaction = await sequelize.transaction();
   try {
     const memberCount = await WeddingMember.count({
-      where: { weddingId: req.member.weddingId },
+      where: { weddingId: req.member.weddingId, status: "active" },
+      transaction,
     });
     if (memberCount > 1) {
+      await transaction.rollback();
       return res.status(409).send({
         code: 409,
         message: "该婚礼已有多位成员，不能直接删除共享数据",
       });
     }
+    const snapshot = await WeddingSnapshot.findOne({
+      where: { weddingId: req.member.weddingId },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const members = await WeddingMember.findAll({
+      where: { weddingId: req.member.weddingId },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const fileIds = collectCloudFileIds(snapshot && snapshot.payload);
+    members.forEach(member => collectCloudFileIds(member.avatarFileId, fileIds));
+
     await WeddingSnapshot.destroy({
       where: { weddingId: req.member.weddingId },
+      transaction,
     });
-    res.send({ code: 0, message: "云端备婚数据已删除" });
+    await WeddingInvite.destroy({
+      where: { weddingId: req.member.weddingId },
+      transaction,
+    });
+    await WeddingMember.destroy({
+      where: { weddingId: req.member.weddingId },
+      transaction,
+    });
+    await Wedding.destroy({
+      where: { weddingId: req.member.weddingId },
+      transaction,
+    });
+    await transaction.commit();
+    res.send({
+      code: 0,
+      message: "云端婚礼空间已删除",
+      data: { fileIds: [...fileIds] },
+    });
   } catch (error) {
+    await transaction.rollback();
     next(error);
   }
 });

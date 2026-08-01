@@ -16,16 +16,21 @@
 - `GET /health`：健康检查
 - `GET /api/profile`：获取当前微信用户的姓名、身份和婚礼 ID
 - `POST /api/weddings/create`：创建婚礼并由服务端生成婚礼 ID
-- `GET /api/weddings/preview/:weddingId`：加入前确认婚期和已有成员
-- `POST /api/weddings/join`：通过婚礼 ID 加入已有婚礼
+- `GET /api/invites/preview/:inviteCode`：加入前确认婚期、身份、权限和已有成员
+- `POST /api/invites/join`：使用一次性邀请码加入婚礼
+- `GET /api/members`：获取当前婚礼成员
+- `PATCH /api/profile/avatar`：更新当前成员的云头像文件 ID
+- `POST /api/invites`：管理员生成 7 天有效的一次性邀请码
+- `PATCH /api/members/:id`：管理员调整成员身份或权限
+- `DELETE /api/members/:id`：管理员移除成员
 - `GET /api/sync`：获取当前用户的云端备婚快照
 - `PUT /api/sync`：提交 `payload` 和 `baseVersion` 更新数据
-- `DELETE /api/sync`：删除当前用户的云端数据
+- `DELETE /api/sync`：仅单一活跃成员时删除完整婚礼空间，并返回待清理的云文件 ID
 - `GET /api/wx_openid`：检查微信身份注入
 
-同步内容按婚礼 ID 归属，包括婚礼信息、筹备任务、婚品、预算和宾客名单。
-新郎和新娘绑定相同婚礼 ID 后读写同一份数据。结婚照当前仍保存在小程序本地，
-不会通过此接口上传。
+同步内容按婚礼 ID 归属，包括婚礼信息、筹备任务、备婚记录、婚品、预算、宾客名单、
+结婚照云文件 ID 和展示方式。新郎、新娘及受邀成员按权限读写同一份快照。
+`PUT /api/sync` 会锁定婚礼记录并校验版本，避免并发写入静默覆盖。
 
 ## 首次部署
 
@@ -45,13 +50,6 @@ DROP TABLE IF EXISTS counters;
 - `editor`：协作者，可查看和编辑筹备数据。
 - `viewer`：只读成员，只能读取云端数据。
 
-加入婚礼改为一次性邀请码：
-
-- `GET /api/invites/preview/:inviteCode`：查看邀请身份、权限和婚礼信息。
-- `POST /api/invites/join`：使用邀请码加入婚礼。
-- `GET /api/members`：获取当前婚礼成员。
-- `POST /api/invites`：管理员生成 7 天有效的一次性邀请码。
-- `PATCH /api/members/:id`：管理员调整成员身份或权限。
-- `DELETE /api/members/:id`：管理员移除成员。
+加入婚礼使用一次性邀请码；新郎或新娘可以成为管理员，其他亲友可设为协作者或只读成员。
 
 不要在已有正式用户后执行上述 SQL。
