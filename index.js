@@ -85,7 +85,20 @@ function requireOwner(req, res, next) {
   next();
 }
 
-function validatePayload(payload) {
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function isOwnedCloudFileId(fileId, weddingId, folderPattern = "(?:photos|materials|records)") {
+  if (typeof fileId !== "string" || fileId.length > 512) return false;
+  const pattern = new RegExp(
+    `^cloud://[^/]+/weddings/${escapeRegExp(weddingId)}/${folderPattern}/[^/]+$`,
+    "i"
+  );
+  return pattern.test(fileId) && !fileId.includes("..");
+}
+
+function validatePayload(payload, weddingId) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return "同步数据格式不正确";
   }
@@ -105,6 +118,10 @@ function validatePayload(payload) {
   );
   if (unknownKeys.length) return `包含不支持的字段：${unknownKeys.join(", ")}`;
   if (JSON.stringify(payload).length > 800000) return "同步数据超过大小限制";
+  const invalidFileId = [...collectCloudFileIds(payload)].find(
+    fileId => !isOwnedCloudFileId(fileId, weddingId)
+  );
+  if (invalidFileId) return "同步数据包含不属于当前婚礼的云文件";
   return "";
 }
 
@@ -478,8 +495,12 @@ app.patch("/api/profile/avatar", requireWeddingMember, async (req, res, next) =>
     const avatarFileId = String(req.body.avatarFileId || "").trim();
     if (
       !avatarFileId ||
-      avatarFileId.length > 512 ||
-      !avatarFileId.startsWith("cloud://")
+      !isOwnedCloudFileId(
+        avatarFileId,
+        req.member.weddingId,
+        "avatars"
+      ) ||
+      !/\.(?:jpg|jpeg|png|webp)$/i.test(avatarFileId)
     ) {
       return res.status(400).send({
         code: 400,
@@ -703,7 +724,7 @@ app.put("/api/sync", requireWeddingMember, requireEditor, async (req, res, next)
   const transaction = await sequelize.transaction();
   try {
     const { payload, baseVersion = 0 } = req.body;
-    const validationError = validatePayload(payload);
+    const validationError = validatePayload(payload, req.member.weddingId);
     if (validationError) {
       await transaction.rollback();
       return res.status(400).send({ code: 400, message: validationError });
