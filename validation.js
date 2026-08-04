@@ -8,6 +8,7 @@ const LIMITS = Object.freeze({
   records: 2000,
   checklist: 50,
   photosPerRecord: 3,
+  customMaterialImages: 20,
   money: 100000000,
   quantity: 100000,
 });
@@ -192,6 +193,12 @@ function validatePayload(payload, weddingId) {
   ];
   const error = checks.find(Boolean);
   if (error) return error;
+  const customMaterialImageCount = payload.materials.filter(item => (
+    typeof item.customImage === "string" && item.customImage.startsWith("cloud://")
+  )).length;
+  if (customMaterialImageCount > LIMITS.customMaterialImages) {
+    return `自定义婚品图片超过体验上限（${LIMITS.customMaterialImages} 张）`;
+  }
   if (!validText(payload.photo, 512) || !validText(payload.photoOriginal, 512)) return "婚礼照片地址不合法";
   const displayError = validatePhotoDisplay(payload.photoDisplay);
   if (displayError) return displayError;

@@ -55,3 +55,13 @@ test("only accepts cloud files owned by the current wedding", () => {
   foreign.records[0].photos = ["cloud://env/weddings/OTHER123/records/photo.jpg"];
   assert.match(validatePayload(foreign, weddingId), /不属于当前婚礼/);
 });
+
+test("limits custom material images in the free cloud experience", () => {
+  const payload = validPayload();
+  payload.materials = Array.from({ length: LIMITS.customMaterialImages + 1 }, (_, index) => ({
+    ...payload.materials[0],
+    id: `material_${index}`,
+    customImage: `cloud://env/weddings/${weddingId}/materials/${index}.jpg`,
+  }));
+  assert.match(validatePayload(payload, weddingId), /自定义婚品图片超过体验上限/);
+});

@@ -18,6 +18,7 @@ const {
 } = require("./validation");
 
 const app = express();
+const CLOUD_MEMBER_LIMIT = 5;
 app.disable("x-powered-by");
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 app.use(express.json({ limit: "1mb" }));
@@ -358,7 +359,22 @@ app.post("/api/invites/join", requireWeChatUser, async (req, res, next) => {
       return res.status(404).send({ code: 404, message: "邀请码不存在或已失效" });
     }
     const weddingId = invite.weddingId;
-    const wedding = await Wedding.findOne({ where: { weddingId }, transaction });
+    const wedding = await Wedding.findOne({
+      where: { weddingId },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const activeMemberCount = await WeddingMember.count({
+      where: { weddingId, status: "active" },
+      transaction,
+    });
+    if (activeMemberCount >= CLOUD_MEMBER_LIMIT) {
+      await transaction.rollback();
+      return res.status(409).send({
+        code: 409,
+        message: `免费云端体验最多支持 ${CLOUD_MEMBER_LIMIT} 名成员`,
+      });
+    }
     const member = await WeddingMember.create(
       {
         openid: req.openid,
@@ -471,6 +487,15 @@ app.post(
   requireOwner,
   async (req, res, next) => {
     try {
+      const memberCount = await WeddingMember.count({
+        where: { weddingId: req.member.weddingId, status: "active" },
+      });
+      if (memberCount >= CLOUD_MEMBER_LIMIT) {
+        return res.status(409).send({
+          code: 409,
+          message: `免费云端体验最多支持 ${CLOUD_MEMBER_LIMIT} 名成员`,
+        });
+      }
       const relation = String(req.body.relation || "").trim();
       const permissionRole = String(req.body.permissionRole || "").trim();
       if (!relation || relation.length > 30) {
