@@ -11,6 +11,11 @@ const {
   WeddingMember,
   WeddingInvite,
 } = require("./db");
+const {
+  collectCloudFileIds,
+  isOwnedCloudFileId,
+  validatePayload,
+} = require("./validation");
 
 const app = express();
 app.disable("x-powered-by");
@@ -83,61 +88,6 @@ function requireOwner(req, res, next) {
     });
   }
   next();
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function isOwnedCloudFileId(fileId, weddingId, folderPattern = "(?:photos|materials|records)") {
-  if (typeof fileId !== "string" || fileId.length > 512) return false;
-  const pattern = new RegExp(
-    `^cloud://[^/]+/weddings/${escapeRegExp(weddingId)}/${folderPattern}/[^/]+$`,
-    "i"
-  );
-  return pattern.test(fileId) && !fileId.includes("..");
-}
-
-function validatePayload(payload, weddingId) {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return "同步数据格式不正确";
-  }
-  const allowedKeys = [
-    "wedding",
-    "tasks",
-    "materials",
-    "budgets",
-    "guests",
-    "records",
-    "photo",
-    "photoOriginal",
-    "photoDisplay",
-  ];
-  const unknownKeys = Object.keys(payload).filter(
-    (key) => !allowedKeys.includes(key)
-  );
-  if (unknownKeys.length) return `包含不支持的字段：${unknownKeys.join(", ")}`;
-  if (JSON.stringify(payload).length > 800000) return "同步数据超过大小限制";
-  const invalidFileId = [...collectCloudFileIds(payload)].find(
-    fileId => !isOwnedCloudFileId(fileId, weddingId)
-  );
-  if (invalidFileId) return "同步数据包含不属于当前婚礼的云文件";
-  return "";
-}
-
-function collectCloudFileIds(value, result = new Set()) {
-  if (typeof value === "string") {
-    if (value.startsWith("cloud://")) result.add(value);
-    return result;
-  }
-  if (Array.isArray(value)) {
-    value.forEach(item => collectCloudFileIds(item, result));
-    return result;
-  }
-  if (value && typeof value === "object") {
-    Object.values(value).forEach(item => collectCloudFileIds(item, result));
-  }
-  return result;
 }
 
 function publicMember(member) {
