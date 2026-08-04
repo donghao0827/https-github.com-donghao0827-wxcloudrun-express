@@ -16,7 +16,7 @@
 - `GET /health`：健康检查
 - `GET /api/profile`：获取当前微信用户的姓名、身份和婚礼 ID
 - `POST /api/weddings/create`：创建婚礼并由服务端生成婚礼 ID
-- `GET /api/invites/preview/:inviteCode`：加入前确认婚期、身份、权限和已有成员
+- `POST /api/invites/preview`：加入前确认婚期、身份、权限和已有成员，请求体传入 `inviteCode`
 - `POST /api/invites/join`：使用一次性邀请码加入婚礼
 - `GET /api/members`：获取当前婚礼成员
 - `PATCH /api/profile/avatar`：更新当前成员的云头像文件 ID

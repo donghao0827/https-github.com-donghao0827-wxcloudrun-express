@@ -312,9 +312,15 @@ app.post("/api/weddings/create", requireWeChatUser, async (req, res, next) => {
   }
 });
 
-app.get("/api/invites/preview/:inviteCode", requireWeChatUser, async (req, res, next) => {
+app.post("/api/invites/preview", requireWeChatUser, async (req, res, next) => {
   try {
-    const inviteCode = String(req.params.inviteCode || "").trim().toUpperCase();
+    const inviteCode = String(req.body.inviteCode || "").trim().toUpperCase();
+    if (!/^[A-Z0-9]{10}$/.test(inviteCode)) {
+      return res.status(400).send({
+        code: 400,
+        message: "请输入 10 位邀请码",
+      });
+    }
     const invite = await WeddingInvite.findOne({
       where: { inviteCode, status: "active" },
     });
