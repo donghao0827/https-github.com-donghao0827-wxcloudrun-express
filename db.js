@@ -153,7 +153,7 @@ const WeddingInvite = sequelize.define(
   { tableName: "wedding_invites" }
 );
 
-async function resetLegacySchemaIfNeeded() {
+async function assertSchemaCompatible() {
   const queryInterface = sequelize.getQueryInterface();
   const tables = (await queryInterface.showAllTables()).map((table) => {
     const tableName =
@@ -167,21 +167,15 @@ async function resetLegacySchemaIfNeeded() {
   const memberColumns = await queryInterface.describeTable("wedding_members");
   if (memberColumns.relation) return;
 
-  console.warn("检测到旧版成员表，正在一次性清理测试数据并升级到 V2 结构");
-  await sequelize.query("SET FOREIGN_KEY_CHECKS = 0");
-  try {
-    await sequelize.query("DROP TABLE IF EXISTS wedding_invites");
-    await sequelize.query("DROP TABLE IF EXISTS wedding_snapshots");
-    await sequelize.query("DROP TABLE IF EXISTS wedding_members");
-    await sequelize.query("DROP TABLE IF EXISTS weddings");
-  } finally {
-    await sequelize.query("SET FOREIGN_KEY_CHECKS = 1");
-  }
+  throw new Error(
+    "检测到旧版 wedding_members 表结构，已拒绝自动删表。" +
+    "请先备份数据库，审核并手动执行迁移脚本后重新启动服务。"
+  );
 }
 
 async function init() {
   await sequelize.authenticate();
-  await resetLegacySchemaIfNeeded();
+  await assertSchemaCompatible();
   await Wedding.sync();
   await WeddingMember.sync();
   const memberColumns = await sequelize
