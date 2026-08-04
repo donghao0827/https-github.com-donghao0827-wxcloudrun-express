@@ -7,7 +7,7 @@ const weddingId = "ABC23456";
 function validPayload() {
   return {
     wedding: { couple: "小满 & 小安", date: "2026-10-18", city: "杭州", venue: "西湖国宾馆" },
-    tasks: [{ id: "tpl_wedding-start", title: "确定婚礼日期", category: "前期规划", stage: "婚礼启动", dueDate: "2026-08-14", done: false, checklist: ["双方确认日期"], dependencies: [] }],
+    tasks: [{ id: "tpl_wedding-start", title: "确定婚礼日期", category: "前期规划", stage: "婚礼启动", dueDate: "2026-08-14", done: false, manualDueDate: false, completedAt: "", checklist: ["双方确认日期"], dependencies: [] }],
     materials: [{ id: "tm1", title: "新娘婚纱", category: "新人礼服", bought: false, quantity: 1, unit: "件", note: "", plannedAmount: 5000, spentAmount: 0, image: "bridal-dress", customImage: "" }],
     budgets: [{ id: "budget_1", category: "礼服造型", planned: 10000, spent: 5000, expenses: [{ id: "expense_1", name: "婚纱定金", amount: 5000, date: "2026-08-01", payer: "新娘", note: "", createdBy: "小满", createdAt: "2026-08-01T10:00:00.000Z", updatedAt: "2026-08-01T10:00:00.000Z" }] }],
     guests: [{ id: "guest_1", name: "张叔叔", side: "男方", group: "亲友", count: 2, status: "已确认" }],
@@ -29,6 +29,15 @@ test("rejects impossible dates and unsafe money values", () => {
   const badMoney = validPayload();
   badMoney.budgets[0].planned = Infinity;
   assert.match(validatePayload(badMoney, weddingId), /金额/);
+});
+
+test("accepts the task manual-date boolean and validates completion dates", () => {
+  const payload = validPayload();
+  payload.tasks[0].manualDueDate = true;
+  payload.tasks[0].completedAt = "2026-08-14";
+  assert.equal(validatePayload(payload, weddingId), "");
+  payload.tasks[0].completedAt = "2026-02-30";
+  assert.match(validatePayload(payload, weddingId), /日期/);
 });
 
 test("rejects malformed ids and guest counts", () => {

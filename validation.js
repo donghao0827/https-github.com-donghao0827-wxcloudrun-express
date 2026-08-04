@@ -107,8 +107,8 @@ function validateTask(item) {
   if (!validId(item.id)) return "的 ID 不合法";
   if (!validText(item.title, 120, true)) return "的名称不合法";
   if (!validText(item.category, 40) || !validText(item.stage, 40)) return "的分类或阶段过长";
-  if (!validDate(item.dueDate) || !validDate(item.manualDueDate)) return "的日期不合法";
-  if (!validBoolean(item.done) || !validBoolean(item.optional) || !validBoolean(item.manuallyScheduled)) return "的完成状态不合法";
+  if (!validDate(item.dueDate) || !validDate(item.completedAt)) return "的日期不合法";
+  if (!validBoolean(item.done) || !validBoolean(item.optional) || !validBoolean(item.manualDueDate) || !validBoolean(item.manuallyScheduled)) return "的完成状态不合法";
   if (!validOptionalNumber(item.idealDaysBefore, 0, 3650, true) || !validOptionalNumber(item.latestDaysBefore, 0, 3650, true)) return "的时间规划不合法";
   if (item.checklist !== undefined) {
     if (!Array.isArray(item.checklist) || item.checklist.length > LIMITS.checklist) return "的明细数量过多";
